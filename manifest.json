@@ -4,7 +4,8 @@
     "version": "1.0",
     "description": "一个强大的Chrome书签管理与搜索工具",
     "permissions": [
-        "bookmarks"
+        "bookmarks",
+        "tabs"
     ],
     "action": {
         "default_popup": "popup.html",
