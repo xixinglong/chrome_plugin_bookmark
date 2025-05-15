@@ -1,17 +1,23 @@
 // 在DOM加载完成后执行
 document.addEventListener('DOMContentLoaded', function() {
     // 获取DOM元素
-    const searchInput = document.getElementById('search-input');
-    const searchButton = document.getElementById('search-button');
     const bookmarkFolders = document.getElementById('bookmark-folders');
     const bookmarkList = document.getElementById('bookmark-list');
+    const searchInput = document.getElementById('search-input');
+    const searchButton = document.getElementById('search-button');
     
-    // 当前选中的文件夹ID
+    // 当前文件夹ID
     let currentFolderId = '1'; // 默认为书签栏
     
     // 拖拽相关变量
     let draggedItem = null;
     let draggedItemIndex = -1;
+    
+    // 初始化批量操作功能
+    enableBatchOperations();
+    
+    // 显示批量操作按钮
+    document.querySelector('.batch-operations').style.display = 'flex';
     
     // 初始化加载书签
     loadBookmarks();
@@ -124,6 +130,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // 设置书签内容
             bookmarkItem.innerHTML = `
                 <div class="bookmark-content">
+                    <input type="checkbox" class="bookmark-checkbox">
                     <img class="bookmark-icon" src="${faviconUrl}" alt="图标">
                     <div class="bookmark-info">
                         <div class="bookmark-title">${bookmark.title || '未命名'}</div>
@@ -136,11 +143,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             `;
             
-            // 点击书签打开链接 (只在内容区域生效)
+            // 点击书签打开链接或选择书签（在批量模式下）
             bookmarkItem.querySelector('.bookmark-content').addEventListener('click', function(e) {
-                // 如果点击的是按钮区域，不打开链接
+                // 如果点击的是按钮区域，不处理
                 if (e.target.closest('.bookmark-actions')) return;
-                chrome.tabs.create({ url: bookmark.url });
+                
+                // 在批量模式下，点击书签项切换选中状态
+                if (document.body.classList.contains('batch-mode')) {
+                    e.preventDefault(); // 阻止默认行为
+                    e.stopPropagation(); // 阻止冒泡
+                    
+                    // 切换选中状态
+                    const isSelected = bookmarkItem.classList.toggle('selected');
+                    const itemCheckbox = bookmarkItem.querySelector('.bookmark-checkbox');
+                    itemCheckbox.checked = isSelected;
+                    
+                    // 更新选中计数
+                    const selectedCountSpan = document.getElementById('selected-count');
+                    const selectedCount = document.querySelectorAll('.bookmark-item.selected').length;
+                    selectedCountSpan.textContent = `已选择 ${selectedCount} 项`;
+                } else {
+                    // 非批量模式下，点击打开链接
+                    chrome.tabs.create({ url: bookmark.url });
+                }
             });
             
             // 编辑按钮点击事件
@@ -377,9 +402,251 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // 批量操作功能（待实现）
+    // 批量操作功能
     function enableBatchOperations() {
-        // 这里可以实现批量选择和操作书签的功能
-        // 例如：添加复选框、全选/取消全选按钮、批量删除按钮等
+        // 获取批量操作相关元素
+        const batchModeBtn = document.getElementById('batch-mode-btn');
+        const selectAllBtn = document.getElementById('select-all-btn');
+        const moveSelectedBtn = document.getElementById('move-selected-btn');
+        const deleteSelectedBtn = document.getElementById('delete-selected-btn');
+        const exportSelectedBtn = document.getElementById('export-selected-btn');
+        const cancelBatchBtn = document.getElementById('cancel-batch-btn');
+        const selectedCountSpan = document.getElementById('selected-count');
+        const batchOperationsDiv = document.querySelector('.batch-operations');
+        
+        // 批量操作模式切换
+        batchModeBtn.addEventListener('click', function() {
+            document.body.classList.add('batch-mode');
+            batchOperationsDiv.classList.add('active');
+            updateSelectedCount();
+        });
+        
+        // 取消批量操作模式
+        cancelBatchBtn.addEventListener('click', function() {
+            document.body.classList.remove('batch-mode');
+            batchOperationsDiv.classList.remove('active');
+            // 取消所有选中状态
+            document.querySelectorAll('.bookmark-item').forEach(item => {
+                item.classList.remove('selected');
+                item.querySelector('.bookmark-checkbox').checked = false;
+            });
+        });
+        
+        // 全选按钮
+        selectAllBtn.addEventListener('click', function() {
+            const allItems = document.querySelectorAll('.bookmark-item');
+            const allSelected = Array.from(allItems).every(item => item.classList.contains('selected'));
+            
+            allItems.forEach(item => {
+                if (allSelected) {
+                    // 如果全部已选中，则取消全选
+                    item.classList.remove('selected');
+                    item.querySelector('.bookmark-checkbox').checked = false;
+                } else {
+                    // 否则全选
+                    item.classList.add('selected');
+                    item.querySelector('.bookmark-checkbox').checked = true;
+                }
+            });
+            
+            updateSelectedCount();
+        });
+        
+        // 删除选中的书签
+        deleteSelectedBtn.addEventListener('click', function() {
+            const selectedItems = document.querySelectorAll('.bookmark-item.selected');
+            if (selectedItems.length === 0) {
+                alert('请先选择要删除的书签');
+                return;
+            }
+            
+            if (confirm(`确定要删除选中的 ${selectedItems.length} 个书签吗？`)) {
+                // 创建一个Promise数组来跟踪所有删除操作
+                const deletePromises = [];
+                
+                selectedItems.forEach(item => {
+                    const bookmarkId = item.dataset.id;
+                    const promise = new Promise((resolve) => {
+                        chrome.bookmarks.remove(bookmarkId, resolve);
+                    });
+                    deletePromises.push(promise);
+                });
+                
+                // 等待所有删除操作完成后刷新列表
+                Promise.all(deletePromises).then(() => {
+                    loadBookmarksInFolder(currentFolderId);
+                    // 退出批量模式
+                    cancelBatchBtn.click();
+                });
+            }
+        });
+        
+        // 移动选中的书签
+        moveSelectedBtn.addEventListener('click', function() {
+            const selectedItems = document.querySelectorAll('.bookmark-item.selected');
+            if (selectedItems.length === 0) {
+                alert('请先选择要移动的书签');
+                return;
+            }
+            
+            // 获取所有文件夹
+            chrome.bookmarks.getTree(function(bookmarkTreeNodes) {
+                // 构建文件夹选择对话框
+                const folderSelectDialog = document.createElement('div');
+                folderSelectDialog.className = 'folder-select-dialog';
+                folderSelectDialog.innerHTML = `
+                    <div class="folder-select-content">
+                        <h3>选择目标文件夹</h3>
+                        <div id="folder-select-tree" class="tree-view"></div>
+                        <div class="folder-select-actions">
+                            <button id="folder-select-cancel">取消</button>
+                            <button id="folder-select-confirm">确定</button>
+                        </div>
+                    </div>
+                `;
+                
+                document.body.appendChild(folderSelectDialog);
+                
+                // 渲染文件夹树
+                const folderSelectTree = document.getElementById('folder-select-tree');
+                let selectedFolderId = null;
+                
+                function renderFolderTree(nodes, parentElement) {
+                    nodes.forEach(function(node) {
+                        if (node.children) {
+                            const folderItem = document.createElement('div');
+                            folderItem.className = 'tree-item folder';
+                            folderItem.textContent = node.title;
+                            folderItem.dataset.id = node.id;
+                            
+                            folderItem.addEventListener('click', function(e) {
+                                e.stopPropagation();
+                                // 设置选中的文件夹ID
+                                selectedFolderId = node.id;
+                                // 移除其他选中状态
+                                document.querySelectorAll('.tree-item.selected').forEach(item => {
+                                    item.classList.remove('selected');
+                                });
+                                // 添加选中状态
+                                folderItem.classList.add('selected');
+                            });
+                            
+                            parentElement.appendChild(folderItem);
+                            
+                            // 如果有子文件夹，递归渲染
+                            if (node.children.length > 0) {
+                                const childrenContainer = document.createElement('div');
+                                childrenContainer.className = 'tree-children';
+                                parentElement.appendChild(childrenContainer);
+                                
+                                // 展开/折叠功能
+                                folderItem.addEventListener('click', function() {
+                                    childrenContainer.classList.toggle('open');
+                                    folderItem.classList.toggle('open');
+                                });
+                                
+                                renderFolderTree(node.children, childrenContainer);
+                            }
+                        }
+                    });
+                }
+                
+                renderFolderTree(bookmarkTreeNodes, folderSelectTree);
+                
+                // 取消按钮
+                document.getElementById('folder-select-cancel').addEventListener('click', function() {
+                    document.body.removeChild(folderSelectDialog);
+                });
+                
+                // 确认按钮
+                document.getElementById('folder-select-confirm').addEventListener('click', function() {
+                    if (!selectedFolderId) {
+                        alert('请选择一个目标文件夹');
+                        return;
+                    }
+                    
+                    // 移动所有选中的书签
+                    const movePromises = [];
+                    
+                    selectedItems.forEach(item => {
+                        const bookmarkId = item.dataset.id;
+                        const promise = new Promise((resolve) => {
+                            chrome.bookmarks.move(bookmarkId, { parentId: selectedFolderId }, resolve);
+                        });
+                        movePromises.push(promise);
+                    });
+                    
+                    // 等待所有移动操作完成后刷新列表
+                    Promise.all(movePromises).then(() => {
+                        loadBookmarksInFolder(currentFolderId);
+                        // 关闭对话框
+                        document.body.removeChild(folderSelectDialog);
+                        // 退出批量模式
+                        cancelBatchBtn.click();
+                    });
+                });
+            });
+        });
+        
+        // 导出选中的书签
+        exportSelectedBtn.addEventListener('click', function() {
+            const selectedItems = document.querySelectorAll('.bookmark-item.selected');
+            if (selectedItems.length === 0) {
+                alert('请先选择要导出的书签');
+                return;
+            }
+            
+            // 构建导出数据
+            const exportData = [];
+            selectedItems.forEach(item => {
+                exportData.push({
+                    title: item.querySelector('.bookmark-title').textContent,
+                    url: item.querySelector('.bookmark-url').textContent
+                });
+            });
+            
+            // 创建下载链接
+            const dataStr = JSON.stringify(exportData, null, 2);
+            const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+            
+            const exportFileDefaultName = 'bookmarks-export.json';
+            
+            const linkElement = document.createElement('a');
+            linkElement.setAttribute('href', dataUri);
+            linkElement.setAttribute('download', exportFileDefaultName);
+            linkElement.click();
+            
+            // 退出批量模式
+            cancelBatchBtn.click();
+        });
+        
+        // 更新选中计数
+        function updateSelectedCount() {
+            const selectedCount = document.querySelectorAll('.bookmark-item.selected').length;
+            selectedCountSpan.textContent = `已选择 ${selectedCount} 项`;
+        }
+        
+        // 为书签列表添加事件委托，处理复选框点击
+        bookmarkList.addEventListener('click', function(e) {
+            if (document.body.classList.contains('batch-mode')) {
+                const checkbox = e.target.closest('.bookmark-checkbox');
+                const bookmarkItem = e.target.closest('.bookmark-item');
+                
+                if (checkbox) {
+                    e.stopPropagation(); // 阻止冒泡，避免触发书签打开
+                    
+                    // 切换选中状态
+                    bookmarkItem.classList.toggle('selected', checkbox.checked);
+                    updateSelectedCount();
+                } else if (bookmarkItem && !e.target.closest('.bookmark-actions')) {
+                    // 在批量模式下点击书签项（非按钮区域）也可以选择
+                    e.preventDefault(); // 阻止默认行为，避免打开书签
+                    const isSelected = bookmarkItem.classList.toggle('selected');
+                    const itemCheckbox = bookmarkItem.querySelector('.bookmark-checkbox');
+                    itemCheckbox.checked = isSelected;
+                    updateSelectedCount();
+                }
+            }
+        });
     }
 });
