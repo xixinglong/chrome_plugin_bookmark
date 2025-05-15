@@ -18,7 +18,19 @@
         
         <main>
             <div class="sidebar">
-                <h2>书签文件夹</h2>
+                <div class="sidebar-header">
+                    <h2>书签文件夹</h2>
+                    <div class="folder-actions">
+                        <div class="folder-menu-toggle">⋮</div>
+                        <div class="folder-menu">
+                            <div class="menu-item" id="add-bookmark-btn">添加书签</div>
+                            <div class="menu-item" id="add-folder-btn">添加新文件夹</div>
+                            <div class="menu-item" id="import-bookmarks-btn">导入书签</div>
+                            <div class="menu-item" id="export-bookmarks-btn">导出书签</div>
+                            <div class="menu-item" id="sort-bookmarks-btn">按名称排序</div>
+                        </div>
+                    </div>
+                </div>
                 <div id="bookmark-folders" class="tree-view"></div>
             </div>
             

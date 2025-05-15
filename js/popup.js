@@ -19,6 +19,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // 显示批量操作按钮
     document.querySelector('.batch-operations').style.display = 'flex';
     
+    // 初始化菜单功能
+    initFolderMenu();
+    
     // 初始化加载书签
     loadBookmarks();
     
@@ -402,6 +405,304 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
+    // 文件夹菜单功能初始化
+    function initFolderMenu() {
+        // 获取菜单按钮
+        const addBookmarkBtn = document.getElementById('add-bookmark-btn');
+        const addFolderBtn = document.getElementById('add-folder-btn');
+        const importBookmarksBtn = document.getElementById('import-bookmarks-btn');
+        const exportBookmarksBtn = document.getElementById('export-bookmarks-btn');
+        const sortBookmarksBtn = document.getElementById('sort-bookmarks-btn');
+        
+        // 添加书签按钮点击事件
+        addBookmarkBtn.addEventListener('click', function() {
+            showAddBookmarkDialog();
+        });
+        
+        // 添加文件夹按钮点击事件
+        addFolderBtn.addEventListener('click', function() {
+            showAddFolderDialog();
+        });
+        
+        // 导入书签按钮点击事件
+        importBookmarksBtn.addEventListener('click', function() {
+            importBookmarks();
+        });
+        
+        // 导出书签按钮点击事件
+        exportBookmarksBtn.addEventListener('click', function() {
+            exportBookmarks();
+        });
+        
+        // 按名称排序按钮点击事件
+        sortBookmarksBtn.addEventListener('click', function() {
+            sortBookmarksByName();
+        });
+    }
+    
+    // 显示添加书签对话框
+    function showAddBookmarkDialog() {
+        // 创建对话框
+        const dialog = document.createElement('div');
+        dialog.className = 'edit-dialog';
+        dialog.innerHTML = `
+            <div class="edit-dialog-content">
+                <h3>添加书签</h3>
+                <div class="form-group">
+                    <label for="add-title">标题</label>
+                    <input type="text" id="add-title" placeholder="请输入书签标题">
+                </div>
+                <div class="form-group">
+                    <label for="add-url">URL</label>
+                    <input type="text" id="add-url" placeholder="请输入URL地址">
+                </div>
+                <div class="dialog-buttons">
+                    <button id="cancel-add">取消</button>
+                    <button id="save-add">保存</button>
+                </div>
+            </div>
+        `;
+        
+        // 添加到页面
+        document.body.appendChild(dialog);
+        
+        // 获取输入框和按钮
+        const titleInput = document.getElementById('add-title');
+        const urlInput = document.getElementById('add-url');
+        const cancelButton = document.getElementById('cancel-add');
+        const saveButton = document.getElementById('save-add');
+        
+        // 聚焦标题输入框
+        titleInput.focus();
+        
+        // 取消按钮点击事件
+        cancelButton.addEventListener('click', function() {
+            document.body.removeChild(dialog);
+        });
+        
+        // 保存按钮点击事件
+        saveButton.addEventListener('click', function() {
+            const title = titleInput.value.trim();
+            const url = urlInput.value.trim();
+            
+            if (!title || !url) {
+                alert('标题和URL不能为空！');
+                return;
+            }
+            
+            // 创建书签
+            chrome.bookmarks.create({
+                parentId: currentFolderId,
+                title: title,
+                url: url
+            }, function() {
+                document.body.removeChild(dialog);
+                loadBookmarksInFolder(currentFolderId);
+            });
+        });
+    }
+    
+    // 显示添加文件夹对话框
+    function showAddFolderDialog() {
+        // 创建对话框
+        const dialog = document.createElement('div');
+        dialog.className = 'edit-dialog';
+        dialog.innerHTML = `
+            <div class="edit-dialog-content">
+                <h3>添加文件夹</h3>
+                <div class="form-group">
+                    <label for="folder-name">文件夹名称</label>
+                    <input type="text" id="folder-name" placeholder="请输入文件夹名称">
+                </div>
+                <div class="dialog-buttons">
+                    <button id="cancel-folder">取消</button>
+                    <button id="save-folder">保存</button>
+                </div>
+            </div>
+        `;
+        
+        // 添加到页面
+        document.body.appendChild(dialog);
+        
+        // 获取输入框和按钮
+        const nameInput = document.getElementById('folder-name');
+        const cancelButton = document.getElementById('cancel-folder');
+        const saveButton = document.getElementById('save-folder');
+        
+        // 聚焦名称输入框
+        nameInput.focus();
+        
+        // 取消按钮点击事件
+        cancelButton.addEventListener('click', function() {
+            document.body.removeChild(dialog);
+        });
+        
+        // 保存按钮点击事件
+        saveButton.addEventListener('click', function() {
+            const name = nameInput.value.trim();
+            
+            if (!name) {
+                alert('文件夹名称不能为空！');
+                return;
+            }
+            
+            // 创建文件夹
+            chrome.bookmarks.create({
+                parentId: currentFolderId,
+                title: name
+            }, function() {
+                document.body.removeChild(dialog);
+                loadBookmarks(); // 重新加载整个书签树
+            });
+        });
+    }
+    
+    // 导入书签
+    function importBookmarks() {
+        // 创建文件输入元素
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.html';
+        fileInput.style.display = 'none';
+        document.body.appendChild(fileInput);
+        
+        // 触发文件选择
+        fileInput.click();
+        
+        // 文件选择事件
+        fileInput.addEventListener('change', function() {
+            if (fileInput.files.length === 0) {
+                document.body.removeChild(fileInput);
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                const content = e.target.result;
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(content, 'text/html');
+                
+                // 获取所有书签链接
+                const bookmarkLinks = doc.querySelectorAll('a');
+                
+                if (bookmarkLinks.length === 0) {
+                    alert('未找到有效的书签！');
+                    document.body.removeChild(fileInput);
+                    return;
+                }
+                
+                // 确认导入
+                if (confirm(`找到 ${bookmarkLinks.length} 个书签，确定导入到当前文件夹吗？`)) {
+                    // 创建一个Promise数组来跟踪所有创建操作
+                    const createPromises = [];
+                    
+                    bookmarkLinks.forEach(link => {
+                        const title = link.textContent.trim();
+                        const url = link.href;
+                        
+                        if (title && url) {
+                            const promise = new Promise((resolve) => {
+                                chrome.bookmarks.create({
+                                    parentId: currentFolderId,
+                                    title: title,
+                                    url: url
+                                }, resolve);
+                            });
+                            createPromises.push(promise);
+                        }
+                    });
+                    
+                    // 等待所有创建操作完成后刷新列表
+                    Promise.all(createPromises).then(() => {
+                        alert('书签导入成功！');
+                        loadBookmarksInFolder(currentFolderId);
+                    });
+                }
+                
+                document.body.removeChild(fileInput);
+            };
+            
+            reader.readAsText(file);
+        });
+    }
+    
+    // 导出书签
+    function exportBookmarks() {
+        // 获取当前文件夹的所有书签
+        chrome.bookmarks.getChildren(currentFolderId, function(bookmarks) {
+            // 过滤掉文件夹，只保留书签
+            const bookmarkItems = bookmarks.filter(bookmark => bookmark.url !== undefined);
+            
+            if (bookmarkItems.length === 0) {
+                alert('当前文件夹中没有可导出的书签！');
+                return;
+            }
+            
+            // 创建HTML内容
+            let html = '<!DOCTYPE NETSCAPE-Bookmark-file-1>\n';
+            html += '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n';
+            html += '<TITLE>Bookmarks</TITLE>\n';
+            html += '<H1>Bookmarks</H1>\n';
+            html += '<DL><p>\n';
+            
+            bookmarkItems.forEach(bookmark => {
+                html += `<DT><A HREF="${bookmark.url}">${bookmark.title}</A>\n`;
+            });
+            
+            html += '</DL><p>';
+            
+            // 创建下载链接
+            const blob = new Blob([html], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'bookmarks.html';
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            
+            // 清理
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
+        });
+    }
+    
+    // 按名称排序书签
+    function sortBookmarksByName() {
+        chrome.bookmarks.getChildren(currentFolderId, function(bookmarks) {
+            // 分离书签和文件夹
+            const folders = bookmarks.filter(item => item.url === undefined);
+            const bookmarkItems = bookmarks.filter(item => item.url !== undefined);
+            
+            // 按标题排序
+            folders.sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'));
+            bookmarkItems.sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'));
+            
+            // 合并排序后的文件夹和书签
+            const sortedItems = [...folders, ...bookmarkItems];
+            
+            // 创建一个Promise数组来跟踪所有移动操作
+            const movePromises = [];
+            
+            // 重新排序
+            sortedItems.forEach((item, index) => {
+                const promise = new Promise((resolve) => {
+                    chrome.bookmarks.move(item.id, { index: index }, resolve);
+                });
+                movePromises.push(promise);
+            });
+            
+            // 等待所有移动操作完成后刷新列表
+            Promise.all(movePromises).then(() => {
+                loadBookmarksInFolder(currentFolderId);
+            });
+        });
+    }
+    
     // 批量操作功能
     function enableBatchOperations() {
         // 获取批量操作相关元素
@@ -596,25 +897,49 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             
-            // 构建导出数据
-            const exportData = [];
-            selectedItems.forEach(item => {
-                exportData.push({
-                    title: item.querySelector('.bookmark-title').textContent,
-                    url: item.querySelector('.bookmark-url').textContent
+            // 获取选中书签的ID
+            const selectedIds = Array.from(selectedItems).map(item => item.dataset.id);
+            
+            // 创建一个Promise数组来获取所有书签详情
+            const getBookmarkPromises = selectedIds.map(id => {
+                return new Promise((resolve) => {
+                    chrome.bookmarks.get(id, (bookmarks) => {
+                        resolve(bookmarks[0]);
+                    });
                 });
             });
             
-            // 创建下载链接
-            const dataStr = JSON.stringify(exportData, null, 2);
-            const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
-            
-            const exportFileDefaultName = 'bookmarks-export.json';
-            
-            const linkElement = document.createElement('a');
-            linkElement.setAttribute('href', dataUri);
-            linkElement.setAttribute('download', exportFileDefaultName);
-            linkElement.click();
+            // 等待所有获取操作完成后导出
+            Promise.all(getBookmarkPromises).then((bookmarks) => {
+                // 创建HTML内容
+                let html = '<!DOCTYPE NETSCAPE-Bookmark-file-1>\n';
+                html += '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n';
+                html += '<TITLE>Bookmarks</TITLE>\n';
+                html += '<H1>Bookmarks</H1>\n';
+                html += '<DL><p>\n';
+                
+                bookmarks.forEach(bookmark => {
+                    html += `<DT><A HREF="${bookmark.url}">${bookmark.title}</A>\n`;
+                });
+                
+                html += '</DL><p>';
+                
+                // 创建下载链接
+                const blob = new Blob([html], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'selected_bookmarks.html';
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                
+                // 清理
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            });
             
             // 退出批量模式
             cancelBatchBtn.click();
